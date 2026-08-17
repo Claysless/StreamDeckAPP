@@ -30,7 +30,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if(init){
-      if (isDarkMode!){
+      if (isDarkMode == null || isDarkMode!){
         Provider.of<ThemeProvider>(context, listen: false).themeData = darkMode;
       }
       init = false;
