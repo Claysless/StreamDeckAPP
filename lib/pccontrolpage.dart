@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -9,6 +10,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:streamdeckapp/theme/dark_mode.dart';
 import 'package:streamdeckapp/theme/theme_provider.dart';
+
+
+class PcApplication {
+  final String title;
+  final String? path;
+  final String? iconBase64;
+
+  PcApplication({
+    required this.title,
+    this.path,
+    this.iconBase64,
+  });
+
+  factory PcApplication.fromJson(Map<String, dynamic> json) {
+    return PcApplication(
+      title: json['title'] ?? '',
+      path: json['path'],
+      iconBase64: json['icon'],
+    );
+  }
+}
+
+
 // --- Model (Same as before) ---
 class PcCommand {
   final String id;
@@ -39,6 +63,7 @@ class PcControlPage extends StatefulWidget {
 }
 
 class _PcControlPageState extends State<PcControlPage> {
+  Completer<List<PcApplication>>? _applicationsCompleter;
   // final String pcIpAddress = '192.168.1.201';
   final int pcPort = 8080;
   Socket? _socket;
@@ -55,6 +80,11 @@ class _PcControlPageState extends State<PcControlPage> {
   final _picker = ImagePicker();
   File? _tempImageFile;
   String? _tempImageBase64;
+
+  List<PcApplication> _applications = [];
+  bool _loadingApplications = false;
+
+
 
   @override
   void initState() {
@@ -131,11 +161,59 @@ class _PcControlPageState extends State<PcControlPage> {
     }
   }
 
+  void _handleServerResponse(Map<String, dynamic> json) {
+    print("Handling response: $json");
+
+    if (json['type'] == 'applications') {
+      final List<dynamic> data = json['applications'] ?? [];
+
+      final applications = data
+          .map((item) => PcApplication.fromJson(
+        item as Map<String, dynamic>,
+      ))
+          .toList();
+
+      print("Received ${applications.length} applications");
+
+      _applicationsCompleter?.complete(applications);
+      _applicationsCompleter = null;
+
+      return;
+    }
+
+    if (json['type'] == 'error') {
+      _applicationsCompleter?.completeError(
+        Exception(json['message'] ?? 'Server error'),
+      );
+
+      _applicationsCompleter = null;
+
+      return;
+    }
+  }
+
   Future<void> _connect() async {
     try {
       _socket = await Socket.connect(_savedIp, pcPort);
       setState(() => _status = "Connected");
-      _socket!.listen((event) {}, onDone: () => setState(() => _status = "Disconnected"));
+      _socket!.listen(
+            (event) {
+          final response = utf8.decode(event);
+
+          print("Server response: $response");
+
+          try {
+            final json = jsonDecode(response);
+
+            _handleServerResponse(json);
+          } catch (e) {
+            print("Invalid server response: $e");
+          }
+        },
+        onDone: () {
+          setState(() => _status = "Disconnected");
+        },
+      );
     } catch (e) {
       setState(() => _status = "Failed: $e");
     }
@@ -153,24 +231,140 @@ class _PcControlPageState extends State<PcControlPage> {
     showDialog(context: context, builder: (ctx) => _buildDialog(ctx, isNew: false, existingCmd: cmd));
   }
 
+  Future<List<PcApplication>> _requestApplications() {
+    _applicationsCompleter = Completer<List<PcApplication>>();
+
+    _sendCommand("get_applications");
+
+    return _applicationsCompleter!.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        _applicationsCompleter = null;
+        throw Exception("Timed out waiting for applications");
+      },
+    );
+  }
+  Future<void> _selectApplication() async {
+    try {
+      final applications = await _requestApplications();
+
+      if (!mounted) return;
+
+      final selected = await showDialog<PcApplication>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text("Select Application"),
+
+            content: SizedBox(
+              width: 600,
+              height: 500,
+
+              child: applications.isEmpty
+                  ? const Center(
+                child: Text("No applications found"),
+              )
+                  : ListView.builder(
+                itemCount: applications.length,
+
+                itemBuilder: (context, index) {
+                  final app = applications[index];
+
+                  Uint8List? iconBytes;
+
+                  if (app.iconBase64 != null &&
+                      app.iconBase64!.isNotEmpty) {
+                    try {
+                      iconBytes = base64Decode(app.iconBase64!);
+                    } catch (_) {
+                      iconBytes = null;
+                    }
+                  }
+
+                  return ListTile(
+                    leading: iconBytes != null
+                        ? Image.memory(
+                      iconBytes,
+                      width: 40,
+                      height: 40,
+                    )
+                        : const Icon(
+                      Icons.apps,
+                      size: 40,
+                    ),
+
+                    title: Text(
+                      app.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+
+                    subtitle: Text(
+                      app.path ?? "Unknown path",
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+
+                    onTap: () {
+                      Navigator.pop(ctx, app);
+                    },
+                  );
+                },
+              ),
+            ),
+
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text("Cancel"),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (selected != null) {
+        setState(() {
+          _labelController.text = selected.title;
+          _cmdController.text = selected.path ?? "";
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Failed to get applications: $e"),
+        ),
+      );
+    }
+  }
   Widget _buildDialog(BuildContext ctx, {required bool isNew, PcCommand? existingCmd}) {
     return StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
       title: Text(isNew ? "Add Command" : "Edit Command"),
       content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _labelController, decoration: InputDecoration(labelText: "Label")),
-          TextField(controller: _cmdController, decoration: InputDecoration(labelText: "Command")),
-          SizedBox(height: 15),
-          GestureDetector(
-            onTap: _pickImage,
-            child: Container(height: 100, width: double.infinity, color: Colors.grey[300],
-              child: _tempImageFile != null ? Image.file(_tempImageFile!, fit: BoxFit.cover)
-                  : (existingCmd?.imageBase64 != null ? Image.memory(_convertBase64ToImage(existingCmd!.imageBase64)!, fit: BoxFit.cover)
-                  : Center(child: Icon(Icons.add_a_photo, color: Colors.grey))),
-            ),
-          ),
-          if (!isNew && existingCmd?.imageBase64 != null)
-            TextButton(onPressed: () { setDialogState(() { _tempImageBase64 = null; }); }, child: Text("Remove Image", style: TextStyle(color: Colors.red))),
+        child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                icon: Icon(Icons.apps,color: Theme.of(context).colorScheme.inversePrimary,),
+                label: Text("Select Application", style: TextStyle(color: Theme.of(context).colorScheme.inversePrimary),),
+                onPressed: _selectApplication,
+              ),
+              TextField(controller: _labelController, decoration: InputDecoration(labelText: "Label")),
+              SizedBox(height: 15),
+              TextField(controller: _cmdController, decoration: InputDecoration(labelText: "Command")),
+              SizedBox(height: 15),
+              GestureDetector(
+                onTap: _pickImage,
+                child: Container(height: 100, width: double.infinity, color: Colors.grey[300],
+                  child: _tempImageFile != null ? Image.file(_tempImageFile!, fit: BoxFit.cover)
+                      : (existingCmd?.imageBase64 != null ? Image.memory(_convertBase64ToImage(existingCmd!.imageBase64)!, fit: BoxFit.cover)
+                      : Center(child: Icon(Icons.add_a_photo, color: Colors.grey))),
+                ),
+              ),
+              if (!isNew && existingCmd?.imageBase64 != null)
+                TextButton(onPressed: () { setDialogState(() { _tempImageBase64 = null; }); }, child: Text("Remove Image", style: TextStyle(color: Colors.red))),
         ]),
       ),
       actions: [
