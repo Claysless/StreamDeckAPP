@@ -1,10 +1,14 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
-
+import 'package:streamdeckapp/theme/dark_mode.dart';
+import 'package:streamdeckapp/theme/theme_provider.dart';
 // --- Model (Same as before) ---
 class PcCommand {
   final String id;
@@ -44,6 +48,7 @@ class _PcControlPageState extends State<PcControlPage> {
   String _savedIp = "192.168.1.15"; // Default
   final _ipController = TextEditingController();
   int _navIndex = 0;
+  bool isLandscape = false;
 
   final _labelController = TextEditingController();
   final _cmdController = TextEditingController();
@@ -55,6 +60,24 @@ class _PcControlPageState extends State<PcControlPage> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+     isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
+    if (isLandscape) {
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.immersiveSticky,
+      );
+    } else {
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.edgeToEdge,
+      );
+    }
   }
 
   // --- Persistence & Logic (Same as before) ---
@@ -288,8 +311,8 @@ class _PcControlPageState extends State<PcControlPage> {
             Text("Tip: Find your PC IP by running 'ipconfig' in CMD (Windows) or 'ifconfig' (Linux/Mac)."),
             SizedBox(height: 30),
             ElevatedButton.icon(
-              icon: Icon(Icons.wifi),
-              label: Text("Connect Now"),
+              icon: Icon(Icons.wifi,color: Theme.of(context).colorScheme.inversePrimary,),
+              label: Text("Connect Now",style: TextStyle(color: Theme.of(context).colorScheme.inversePrimary,) ),
               onPressed: () {
                 setState(() => _savedIp = _ipController.text);
                 _saveData();
@@ -304,10 +327,35 @@ class _PcControlPageState extends State<PcControlPage> {
               value: _crossAxisCount.toDouble(),
               min: 1, max: 9, divisions: 8,
               label: "$_crossAxisCount",
+              activeColor: Theme.of(context).colorScheme.inversePrimary,
               onChanged: (val) {
                 setState(() => _crossAxisCount = val.toInt());
                 _saveData();
               },
+            ),
+            Divider(),
+            SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+            const Text(
+              "Dark Mode",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            CupertinoSwitch(
+              value:
+              Provider.of<ThemeProvider>(context, listen: false)
+                  .isDarkMode,
+              onChanged: (value) async {
+                Provider.of<ThemeProvider>(context, listen: false)
+                    .toggleTheme();
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('theme_darkmode', value); // Save theme mode
+              },
+            ),
+
+              ],
             ),
           ],
         ),
@@ -319,21 +367,24 @@ class _PcControlPageState extends State<PcControlPage> {
   Widget build(BuildContext context) {
     bool currentEditMode = _navIndex == 2;
     return Scaffold(
-      appBar: AppBar(title: Text(currentEditMode ? "Edit Mode" : "PC Remote"), actions: [
+      appBar:  isLandscape == false ? AppBar(title: Text("PC Remote"), actions: [
+        Text("Status: $_status", style: TextStyle(fontWeight: FontWeight.bold)),
+        IconButton(icon: Icon(_socket == null ? Icons.wifi_off : Icons.wifi, color: _status == "Connected" ? Colors.green : Colors.red), onPressed: _connect),
+        Padding(padding: EdgeInsetsGeometry.all(10)),
         if (_navIndex == 0 || _navIndex == 2) IconButton(icon: Icon(Icons.add), onPressed: _showAddDialog),
-      ]),
+      ]) : null,
       body: Column(children: [
-        Padding(padding: EdgeInsets.all(8), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text("Status: $_status", style: TextStyle(fontWeight: FontWeight.bold)),
-          IconButton(icon: Icon(_socket == null ? Icons.wifi_off : Icons.wifi, color: _status == "Connected" ? Colors.green : Colors.red), onPressed: _connect),
-        ])),
+        // Padding(padding: EdgeInsets.all(8), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        //
+        //
+        // ])),
         Expanded(child: _navIndex == 1 ? _buildSettings() : (_commands.isEmpty ? Center(child: Text("No commands")) : _buildGrid(currentEditMode))),
       ]),
-      bottomNavigationBar: BottomNavigationBar(currentIndex: _navIndex, onTap: (index) => setState(() => _navIndex = index), items: [
+      bottomNavigationBar: isLandscape == false ? BottomNavigationBar(currentIndex: _navIndex, onTap: (index) => setState(() => _navIndex = index), items: [
         BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: "Control"),
         BottomNavigationBarItem(icon: Icon(Icons.tune), label: "Settings"),
         BottomNavigationBarItem(icon: Icon(Icons.edit), label: "Edit"),
-      ]),
+      ]) : null,
     );
   }
 }
