@@ -11,6 +11,48 @@ import 'package:image_picker/image_picker.dart';
 import 'package:streamdeckapp/theme/dark_mode.dart';
 import 'package:streamdeckapp/theme/theme_provider.dart';
 
+class PcProfile {
+  final String id;
+  String name;
+  String ip;
+  int port;
+  int gridColumns;
+  List<PcCommand> commands;
+
+  PcProfile({
+    required this.id,
+    required this.name,
+    required this.ip,
+    this.port = 8080,
+    this.gridColumns = 2,
+    required this.commands,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'ip': ip,
+    'port': port,
+    'gridColumns': gridColumns,
+    'commands': commands.map((c) => c.toJson()).toList(),
+  };
+
+  factory PcProfile.fromJson(Map<String, dynamic> json) {
+    return PcProfile(
+      id: json['id'],
+      name: json['name'],
+      ip: json['ip'],
+      port: json['port'] ?? 8080,
+      gridColumns: json['gridColumns'] ?? 2,
+      commands: (json['commands'] as List)
+          .map((e) => PcCommand.fromJson(e))
+          .toList(),
+    );
+  }
+}
+
+
+
 
 class PcApplication {
   final String title;
@@ -65,12 +107,26 @@ class PcControlPage extends StatefulWidget {
 class _PcControlPageState extends State<PcControlPage> {
   Completer<List<PcApplication>>? _applicationsCompleter;
   // final String pcIpAddress = '192.168.1.201';
-  final int pcPort = 8080;
+  // final int pcPort = 8080;
   Socket? _socket;
   String _status = "Disconnected";
-  List<PcCommand> _commands = [];
-  int _crossAxisCount = 2;
-  String _savedIp = "192.168.1.15"; // Default
+  // List<PcCommand> _commands = [];
+  // int _crossAxisCount = 2;
+  // String _savedIp = "192.168.1.15"; // Default
+  List<PcProfile> _profiles = [];
+  int _currentProfile = 0;
+  PcProfile get currentProfile {
+    if (_profiles.isEmpty) {
+      throw StateError("No profiles available");
+    }
+
+    if (_currentProfile < 0 ||
+        _currentProfile >= _profiles.length) {
+      _currentProfile = 0;
+    }
+
+    return _profiles[_currentProfile];
+  }
   final _ipController = TextEditingController();
   int _navIndex = 0;
   bool isLandscape = false;
@@ -111,40 +167,94 @@ class _PcControlPageState extends State<PcControlPage> {
   }
 
   // --- Persistence & Logic (Same as before) ---
+  // Future<void> _loadData() async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   // Load IP
+  //   currentProfile.ip = prefs.getString('pc_ip') ?? "192.168.1.15";
+  //   _ipController.text = currentProfile.ip;
+  //   final String? data = prefs.getString('pc_commands');
+  //
+  //   if (data != null) {
+  //     // 1. Decode to List<dynamic>
+  //     final List<dynamic> jsonList = jsonDecode(data);
+  //
+  //     // 2. Explicitly map to List<PcCommand>
+  //     setState(() {
+  //       currentProfile.commands = jsonList.map((item) => PcCommand.fromJson(item as Map<String, dynamic>)).toList();
+  //     });
+  //   } else {
+  //     // Default commands
+  //     setState(() {
+  //       currentProfile.commands = [
+  //         PcCommand(id: '1', label: 'Notepad', commandString: 'open_notepad'),
+  //         PcCommand(id: '2', label: 'Calculator', commandString: 'open_calculator'),
+  //       ];
+  //     });
+  //   }
+  //
+  //   // Load grid count
+  //   currentProfile.gridColumns = prefs.getInt('grid_columns') ?? 2;
+  // }
+
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    // Load IP
-    _savedIp = prefs.getString('pc_ip') ?? "192.168.1.15";
-    _ipController.text = _savedIp;
-    final String? data = prefs.getString('pc_commands');
 
-    if (data != null) {
-      // 1. Decode to List<dynamic>
-      final List<dynamic> jsonList = jsonDecode(data);
+    final jsonString = prefs.getString('pc_profiles');
 
-      // 2. Explicitly map to List<PcCommand>
-      setState(() {
-        _commands = jsonList.map((item) => PcCommand.fromJson(item as Map<String, dynamic>)).toList();
-      });
+    if (jsonString != null) {
+      final list = jsonDecode(jsonString) as List;
+
+      _profiles = list
+          .map((e) => PcProfile.fromJson(e))
+          .toList();
     } else {
-      // Default commands
-      setState(() {
-        _commands = [
-          PcCommand(id: '1', label: 'Notepad', commandString: 'open_notepad'),
-          PcCommand(id: '2', label: 'Calculator', commandString: 'open_calculator'),
-        ];
-      });
+      _profiles = [
+        PcProfile(
+          id: "1",
+          name: "My PC",
+          ip: "192.168.1.15",
+          commands: [
+            PcCommand(
+              id: "1",
+              label: "Notepad",
+              commandString: "open_notepad",
+            ),
+          ],
+        ),
+      ];
     }
 
-    // Load grid count
-    _crossAxisCount = prefs.getInt('grid_columns') ?? 2;
+    _currentProfile =
+        prefs.getInt('selected_profile') ?? 0;
+
+    if (_currentProfile >= _profiles.length) {
+      _currentProfile = 0;
+    }
+
+    _ipController.text = currentProfile.ip;
+
+    setState(() {});
   }
+
+  // Future<void> _saveData() async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   await prefs.setString('pc_ip', currentProfile.ip); // Save IP
+  //   await prefs.setString('pc_commands', jsonEncode(currentProfile.commands.map((c) => c.toJson()).toList()));
+  //   await prefs.setInt('grid_columns', currentProfile.gridColumns);
+  // }
 
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('pc_ip', _savedIp); // Save IP
-    await prefs.setString('pc_commands', jsonEncode(_commands.map((c) => c.toJson()).toList()));
-    await prefs.setInt('grid_columns', _crossAxisCount);
+
+    await prefs.setString(
+      'pc_profiles',
+      jsonEncode(_profiles.map((p) => p.toJson()).toList()),
+    );
+
+    await prefs.setInt(
+      'selected_profile',
+      _currentProfile,
+    );
   }
 
   Future<void> _pickImage() async {
@@ -194,7 +304,7 @@ class _PcControlPageState extends State<PcControlPage> {
 
   Future<void> _connect() async {
     try {
-      _socket = await Socket.connect(_savedIp, pcPort);
+      _socket = await Socket.connect(currentProfile.ip, currentProfile.port);
       setState(() => _status = "Connected");
       _socket!.listen(
             (event) {
@@ -374,10 +484,10 @@ class _PcControlPageState extends State<PcControlPage> {
             if (_labelController.text.isEmpty || _cmdController.text.isEmpty) return;
             setState(() {
               if (isNew) {
-                _commands.add(PcCommand(id: DateTime.now().millisecondsSinceEpoch.toString(), label: _labelController.text, commandString: _cmdController.text, imageBase64: _tempImageBase64));
+                currentProfile.commands.add(PcCommand(id: DateTime.now().millisecondsSinceEpoch.toString(), label: _labelController.text, commandString: _cmdController.text, imageBase64: _tempImageBase64));
               } else {
-                final index = _commands.indexWhere((c) => c.id == existingCmd!.id);
-                if (index != -1) _commands[index] = PcCommand(id: existingCmd!.id, label: _labelController.text, commandString: _cmdController.text, imageBase64: _tempImageBase64 ?? existingCmd.imageBase64);
+                final index = currentProfile.commands.indexWhere((c) => c.id == existingCmd!.id);
+                if (index != -1) currentProfile.commands[index] = PcCommand(id: existingCmd!.id, label: _labelController.text, commandString: _cmdController.text, imageBase64: _tempImageBase64 ?? existingCmd.imageBase64);
               }
             });
             _saveData();
@@ -390,25 +500,176 @@ class _PcControlPageState extends State<PcControlPage> {
   }
 
   void _removeCommand(String id) {
-    setState(() => _commands.removeWhere((cmd) => cmd.id == id));
+    setState(() => currentProfile.commands.removeWhere((cmd) => cmd.id == id));
     _saveData();
   }
+
+  void _addProfile() {
+    final name = TextEditingController();
+    final ip = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("New Profile"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: name,
+              decoration: const InputDecoration(
+                labelText: "Profile Name",
+              ),
+            ),
+            TextField(
+              controller: ip,
+              decoration: const InputDecoration(
+                labelText: "IP Address",
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _profiles.add(
+                  PcProfile(
+                    id: DateTime.now()
+                        .millisecondsSinceEpoch
+                        .toString(),
+                    name: name.text,
+                    ip: ip.text,
+                    commands: [],
+                  ),
+                );
+
+                _currentProfile = _profiles.length - 1;
+              });
+
+              _saveData();
+              Navigator.pop(context);
+            },
+            child: const Text("Create"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _duplicateProfile() {
+    final p = currentProfile;
+
+    _profiles.add(
+      PcProfile(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: "${p.name} Copy",
+        ip: p.ip,
+        port: p.port,
+        gridColumns: p.gridColumns,
+        commands: p.commands
+            .map((c) => PcCommand.fromJson(c.toJson()))
+            .toList(),
+      ),
+    );
+
+    _saveData();
+  }
+
+  Future<void> _deleteCurrentProfile() async {
+    if (_profiles.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You must have at least one profile."),
+        ),
+      );
+
+      return;
+    }
+
+    final profile = currentProfile;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete Profile?"),
+
+        content: Text(
+          'Are you sure you want to delete "${profile.name}"?\n\n'
+              'All buttons and settings belonging to this profile will be removed.',
+        ),
+
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx, false);
+            },
+            child: const Text("Cancel"),
+          ),
+
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx, true);
+            },
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _profiles.removeAt(_currentProfile);
+
+      // Select a valid profile
+      if (_currentProfile >= _profiles.length) {
+        _currentProfile = _profiles.length - 1;
+      }
+
+      _ipController.text = currentProfile.ip;
+    });
+
+    // Disconnect from the old profile
+    try {
+      await _socket?.close();
+    } catch (_) {}
+
+    _socket = null;
+
+    setState(() {
+      _status = "Disconnected";
+    });
+
+    await _saveData();
+  }
+
 
   // --- Updated Grid Builder ---
   Widget _buildGrid(bool isEdit) {
     return GridView.builder(
       padding: EdgeInsets.all(10),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: _crossAxisCount,
+        crossAxisCount: currentProfile.gridColumns,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
         childAspectRatio: 1.0,
       ),
-      itemCount: _commands.length,
+      itemCount: currentProfile.commands.length,
       itemBuilder: (ctx, index) {
-        final cmd = _commands[index];
+        final cmd = currentProfile.commands[index];
         final Uint8List? imgBytes = _convertBase64ToImage(cmd.imageBase64);
-        final bool isSmallCard = _crossAxisCount >= 5; // Threshold for hiding text
+        final bool isSmallCard = currentProfile.gridColumns >= 5; // Threshold for hiding text
 
         return Card(
           color: isEdit ? Colors.grey[200] : null,
@@ -494,7 +755,7 @@ class _PcControlPageState extends State<PcControlPage> {
                 suffixIcon: IconButton(
                   icon: Icon(Icons.save),
                   onPressed: () {
-                    setState(() => _savedIp = _ipController.text);
+                    setState(() => currentProfile.ip = _ipController.text);
                     _saveData();
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("IP Saved!")));
                   },
@@ -508,7 +769,7 @@ class _PcControlPageState extends State<PcControlPage> {
               icon: Icon(Icons.wifi,color: Theme.of(context).colorScheme.inversePrimary,),
               label: Text("Connect Now",style: TextStyle(color: Theme.of(context).colorScheme.inversePrimary,) ),
               onPressed: () {
-                setState(() => _savedIp = _ipController.text);
+                setState(() => currentProfile.ip = _ipController.text);
                 _saveData();
                 _connect();
               },
@@ -518,12 +779,12 @@ class _PcControlPageState extends State<PcControlPage> {
             SizedBox(height: 10),
             Text("Grid Settings", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             Slider(
-              value: _crossAxisCount.toDouble(),
+              value: currentProfile.gridColumns.toDouble(),
               min: 1, max: 9, divisions: 8,
-              label: "$_crossAxisCount",
+              label: currentProfile.gridColumns.toString(),
               activeColor: Theme.of(context).colorScheme.inversePrimary,
               onChanged: (val) {
-                setState(() => _crossAxisCount = val.toInt());
+                setState(() => currentProfile.gridColumns = val.toInt());
                 _saveData();
               },
             ),
@@ -561,8 +822,81 @@ class _PcControlPageState extends State<PcControlPage> {
   Widget build(BuildContext context) {
     bool currentEditMode = _navIndex == 2;
     return Scaffold(
-      appBar:  isLandscape == false ? AppBar(title: Text("PC Remote"), actions: [
-        Text("Status: $_status", style: TextStyle(fontWeight: FontWeight.bold)),
+      appBar:  isLandscape == false ? AppBar(title: Text(_profiles[_currentProfile].name,), actions: [
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.computer),
+
+          onSelected: (value) {
+            if (value == 'new') {
+              _addProfile();
+              return;
+            }
+
+            if (value == 'delete') {
+              _deleteCurrentProfile();
+              return;
+            }
+
+            final index = int.parse(value);
+
+            setState(() {
+              _currentProfile = index;
+              _ipController.text = currentProfile.ip;
+            });
+
+            _saveData();
+          },
+
+          itemBuilder: (_) => [
+            for (int i = 0; i < _profiles.length; i++)
+              PopupMenuItem(
+                value: i.toString(),
+                child: Row(
+                  children: [
+                    const Icon(Icons.computer),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _profiles[i].name,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+
+                    if (i == _currentProfile)
+                      const Icon(Icons.check),
+                  ],
+                ),
+              ),
+
+            const PopupMenuDivider(),
+
+            const PopupMenuItem(
+              value: 'new',
+              child: Row(
+                children: [
+                  Icon(Icons.add),
+                  SizedBox(width: 8),
+                  Text("New Profile"),
+                ],
+              ),
+            ),
+
+            const PopupMenuItem(
+              value: 'delete',
+              child: Row(
+                children: [
+                  Icon(Icons.delete, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text(
+                    "Delete Current Profile",
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        // Text("Status: $_status", style: TextStyle(fontWeight: FontWeight.bold)),
         IconButton(icon: Icon(_socket == null ? Icons.wifi_off : Icons.wifi, color: _status == "Connected" ? Colors.green : Colors.red), onPressed: _connect),
         Padding(padding: EdgeInsetsGeometry.all(10)),
         if (_navIndex == 0 || _navIndex == 2) IconButton(icon: Icon(Icons.add), onPressed: _showAddDialog),
@@ -572,7 +906,7 @@ class _PcControlPageState extends State<PcControlPage> {
         //
         //
         // ])),
-        Expanded(child: _navIndex == 1 ? _buildSettings() : (_commands.isEmpty ? Center(child: Text("No commands")) : _buildGrid(currentEditMode))),
+        Expanded(child: _navIndex == 1 ? _buildSettings() : (currentProfile.commands.isEmpty ? Center(child: Text("No commands")) : _buildGrid(currentEditMode))),
       ]),
       bottomNavigationBar: isLandscape == false ? BottomNavigationBar(currentIndex: _navIndex, onTap: (index) => setState(() => _navIndex = index), items: [
         BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: "Control"),
